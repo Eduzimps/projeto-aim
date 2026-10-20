@@ -2,11 +2,9 @@
 set -euo pipefail
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 mkdir -p "$project_dir/build"
-"${CXX:-g++}" -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
-  -I"$project_dir/include" "$project_dir/tests/core_test.cpp" \
-  -o "$project_dir/build/core_test"
-"$project_dir/build/core_test"
-"${CXX:-g++}" -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
-  -I"$project_dir/include" "$project_dir/tests/camera_profile_test.cpp" \
-  -o "$project_dir/build/camera_profile_test"
-"$project_dir/build/camera_profile_test"
+for test_name in core camera_profile messiah_projection scene_profile; do
+  "${CXX:-g++}" -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+    -I"$project_dir/include" "$project_dir/tests/${test_name}_test.cpp" \
+    -o "$project_dir/build/${test_name}_test"
+  "$project_dir/build/${test_name}_test"
+done

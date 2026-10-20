@@ -59,6 +59,7 @@ struct ProbeResult {
     const char* stage = "module";
     bool root_vtables_matched = false;
     bool camera_vtable_in_rdata = false;
+    std::uint64_t camera_address = 0; // Internal consistency check; never serialize.
     CameraValues values;
 };
 
@@ -144,6 +145,7 @@ inline ProbeResult probe(std::uint64_t module_base, std::uint64_t mapped_size,
         return result;
     }
     result.stage = "candidate_camera";
+    result.camera_address = camera;
     result.status = ProbeStatus::candidate_sample;
     return result;
 }
