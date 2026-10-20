@@ -4,6 +4,7 @@
 *.o
 *.obj
 *.pdb
+BloodStrike-analise-*/
 !/dist/zyon-preview.exe
 !/dist/zyon-preview.png
 !/dist/zyon-windows-preview.zip

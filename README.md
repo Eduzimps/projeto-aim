@@ -66,6 +66,14 @@ Para implementar e verificar uma conexão real, ainda faltam a versão/build cor
 
 Este projeto não se conecta ao processo do jogo. A compilação e os testes matemáticos não validam ESP ou aimbot dentro de Blood Strike.
 
+### Coletar o cliente instalado para análise estática
+
+`scripts/collect-client.ps1` é um auxiliar para Windows PowerShell 5.1 ou posterior. Com o jogo aberto, ele localiza o arquivo `BloodStrike.exe` no disco e copia seus bytes para ZIPs com até 30 MiB de dados originais por parte, acompanhados de `manifesto.json` com hashes SHA256. A saída fica em uma pasta nova `BloodStrike-analise-*` na Área de Trabalho.
+
+O coletor lê somente o executável em disco, preserva os arquivos do jogo e não envia os ZIPs automaticamente. Os ZIPs e o manifesto podem ser anexados na conversa para investigar o cliente. A cópia do executável não garante que será possível identificar todos os dados de câmera e jogadores ou concluir a integração.
+
+O script aceita `-ExecutablePath` para indicar o arquivo explicitamente e `-OutputDirectory` para escolher outra pasta existente. Falhas de acesso são reportadas; o coletor não solicita privilégios elevados. As pastas de coleta são ignoradas pelo Git e não devem ser publicadas no repositório.
+
 ## Organização
 
 ```text
