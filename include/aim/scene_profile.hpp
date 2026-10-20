@@ -3,6 +3,7 @@
 #include "aim/camera_profile.hpp"
 #include "aim/scene_collections.hpp"
 #include "aim/entity_position.hpp"
+#include "aim/entity_identity.hpp"
 
 #include <algorithm>
 #include <array>
@@ -16,6 +17,7 @@ namespace aim::scene_profile {
 namespace cp = camera_profile;
 namespace sc = scene_collections;
 namespace ep = entity_position;
+namespace ei = entity_identity;
 // These are build-specific native RTTI primary vtables, not player classes.
 inline constexpr std::uint64_t camera_vtable_rva = 0x04e57558;
 inline constexpr std::uint64_t scenario_vtable_rva = 0x04fa1ce8;
@@ -66,6 +68,10 @@ struct EntitySummary {
     bool skeleton_checked = false;
     bool skeleton_present = false;
     bool position_checked = false;
+    bool character_controller_checked = false;
+    bool character_controller_present = false;
+    bool is_local_role = false;
+    ei::Resource resource;
     Vec3 position;
 };
 struct Result {
@@ -81,6 +87,8 @@ struct Result {
     bool scene_guards_matched = false;
     bool consistency_recheck_passed = false;
     bool collection_complete = false;
+    bool local_role_present = false;
+    bool local_role_observed = false;
     std::size_t read_count = 0, read_bytes = 0;
     std::size_t levels_observed = 0, areas_observed = 0;
     std::size_t entity_nodes_observed = 0;
@@ -202,6 +210,9 @@ inline Result probe(std::uint64_t module_base, std::uint64_t mapped_size,
     };
     std::vector<sc::Collection> collections;
     std::vector<std::uint64_t> levels, areas, observed_entities;
+    std::uint64_t local_role = 0;
+    if (!anchor_pointer(roots[2], 0xdd8, local_role, "local_role")) return result;
+    result.local_role_present = local_role != 0;
     const auto add_unique = [&](std::vector<std::uint64_t>& values, std::uint64_t value,
                                 std::size_t limit, const char* stage) {
         if (!value || std::find(values.begin(), values.end(), value) != values.end()) return true;
@@ -236,6 +247,7 @@ inline Result probe(std::uint64_t module_base, std::uint64_t mapped_size,
         collections.push_back(std::move(subareas));
     }
     const auto limit = std::min(node_limit, max_nodes);
+    bool truncated = false;
     for (auto area : areas) {
         if (!exact_vtable(area, area_vtable_rva, "area_vtable")) return result;
         ++result.areas_observed;
@@ -255,20 +267,45 @@ inline Result probe(std::uint64_t module_base, std::uint64_t mapped_size,
                 result.status = Status::entity_vtable_outside_rdata; return result;
             }
             EntitySummary entity;
+            entity.is_local_role = object == local_role;
+            result.local_role_observed = result.local_role_observed || entity.is_local_role;
             entity.vtable_rva = entity_vtable - module_base;
             entity.native_entity_type_known = std::find(entity_vtables.begin(), entity_vtables.end(),
                                                        entity.vtable_rva) != entity_vtables.end();
             if (entity.native_entity_type_known) {
                 std::uint8_t tag = 0;
+                std::uint64_t components = 0, skeleton = 0;
                 if (!read_at(object, 0xa1, &tag, sizeof(tag), "entity_skeleton_tag")) return result;
                 if (tag & 0x80) {
-                    std::uint64_t components = 0, skeleton = 0;
                     if (!read_pointer(object, 0x40, components, "entity_components") ||
                         !read_pointer(components, (tag & 0x7f) * sizeof(std::uint64_t), skeleton,
                                       "entity_skeleton_component")) return result;
                     entity.skeleton_present = skeleton != 0;
                 }
                 entity.skeleton_checked = true;
+                std::uint8_t controller_tag = 0;
+                if (!read_at(object, 0xa7, &controller_tag, sizeof(controller_tag), "entity_controller_tag")) return result;
+                if (controller_tag & 0x80) {
+                    std::uint64_t controller = 0;
+                    if ((!components && !read_pointer(object, 0x40, components, "entity_components")) ||
+                        !read_pointer(components, (controller_tag & 0x7f) * sizeof(std::uint64_t), controller,
+                                      "entity_controller_component")) return result;
+                    entity.character_controller_present = controller != 0;
+                }
+                entity.character_controller_checked = true;
+                if (skeleton) {
+                    entity.resource = ei::read_resource(module_base, skeleton, bounded_reader);
+                    if (entity.resource.status == ei::Status::read_failed ||
+                        entity.resource.status == ei::Status::invalid_address ||
+                        entity.resource.status == ei::Status::snapshot_changed) {
+                        result.stage = "skeleton_resource";
+                        if (result.status != Status::read_budget_exceeded)
+                            result.status = entity.resource.status == ei::Status::snapshot_changed ?
+                                Status::snapshot_changed : (entity.resource.status == ei::Status::invalid_address ?
+                                    Status::invalid_address : Status::read_failed);
+                        return result;
+                    }
+                }
                 const auto position = ep::read(object, bounded_reader);
                 if (position.status != ep::Status::candidate_position) {
                     result.stage = position.stage;
@@ -282,6 +319,11 @@ inline Result probe(std::uint64_t module_base, std::uint64_t mapped_size,
             }
             observed_entities.push_back(object);
             result.entities.push_back(entity);
+        }
+        if (objects.status == sc::Status::limit_reached) {
+            truncated = true;
+            collections.push_back(std::move(objects));
+            break;
         }
         if (!accept_collection(objects, "area_entities")) return result;
         collections.push_back(std::move(objects));
@@ -301,9 +343,10 @@ inline Result probe(std::uint64_t module_base, std::uint64_t mapped_size,
     }
 
     result.consistency_recheck_passed = true;
-    result.collection_complete = true;
-    result.stage = "candidate_scene_collection";
-    result.status = Status::candidate_collection;
+    result.collection_complete = !truncated;
+    result.stage = truncated ? "candidate_scene_prefix" : "candidate_scene_collection";
+    result.detail_stage = truncated ? "collection_limit" : "none";
+    result.status = truncated ? Status::node_limit_reached : Status::candidate_collection;
     return result;
 }
 

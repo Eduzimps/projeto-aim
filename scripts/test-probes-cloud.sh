@@ -63,6 +63,13 @@ done
 rg -q 'fixture-ready' "$test_dir/fixture.log"
 run_probe camera wrong-build
 run_probe scene wrong-build
+"$toolchain_root/usr/bin/x86_64-w64-mingw32-g++-posix" \
+  -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -DUNICODE -D_UNICODE \
+  -I"$project_dir/include" "$project_dir/tests/windows_scene_report_fixture.cpp" \
+  -o "$test_dir/scene-report-fixture.exe" -static -static-libgcc -static-libstdc++ \
+  -lbcrypt -lshell32 -lole32 -luser32
+"$runtime_root/usr/lib/wine/wine64" "$test_dir/scene-report-fixture.exe" \
+  >"$test_dir/synthetic-report.json" 2>"$test_dir/synthetic-report.log"
 python3 - "$test_dir" <<'PY'
 import json, pathlib, sys
 root = pathlib.Path(sys.argv[1])
@@ -70,7 +77,7 @@ for name in ('camera', 'scene'):
     for scenario, expected in (('absent', 'client_not_running'),
                                ('wrong-build', 'build_file_size_mismatch')):
         report = json.loads((root / f'{name}-{scenario}.json').read_text())
-        expected_format = 'zyon-camera-candidate-v1' if name == 'camera' else 'zyon-scene-candidate-v2'
+        expected_format = 'zyon-camera-candidate-v1' if name == 'camera' else 'zyon-scene-candidate-v3'
         assert report['format'] == expected_format, report
         assert report['status'] == expected, report
         assert not report['file_sha256_matched'], report
@@ -85,4 +92,15 @@ expected += [json.loads(p.read_text()) for p in root.glob('*-wrong-build.json')]
 assert sorted(map(lambda x: json.dumps(x, sort_keys=True), expected)) == sorted(
     json.dumps(json.loads(p.read_text()), sort_keys=True) for p in reports)
 print('Four Desktop reports match stdout; uploaded client was not executed.')
+fixture = json.loads((root / 'synthetic-report.json').read_text())
+assert fixture['status'] == 'synthetic_fixture'
+assert fixture['scene']['local_role_present'] and fixture['scene']['local_role_observed']
+assert len(fixture['position_samples']) == 16
+assert all(not sample['is_local_role'] for sample in fixture['position_samples'])
+assert len(fixture['resource_signatures']) == 32 and fixture['resource_signatures_truncated']
+assert all(item['resource_identifier'].startswith('actors/body_') for item in fixture['resource_signatures'])
+assert fixture['observed_native_types'][0]['character_controller_present'] == 40
+assert fixture['observed_native_types'][0]['local_roles'] == 1
+assert fixture['observed_skeleton_types'][0]['count'] == 40
+print('Synthetic Windows JSON: identity fields, finite projections and output caps passed.')
 PY

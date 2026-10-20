@@ -49,6 +49,8 @@ O bloco de rotação tem eixos aproximadamente ortonormais. Isso é compatível 
 
 O primeiro relatório de cena passou na identidade da build e na leitura da câmera, inclusive origem e viewport. Parou com `null_pointer` em `world_vtable`: o campo `camera.World` estava nulo. Foram feitas 21 leituras, sem erro Win32, e nenhuma lista de entidades foi acessada. Portanto, `objects_observed: 0` nesse relatório não indica cena vazia.
 
+O relatório seguinte, formato v2, acessou o mundo ativo do cenário e observou 256 objetos em duas áreas de dois níveis, com 35 esqueletos e leitura de posição para todos os objetos observados. Parou em `node_limit_reached`, com 2.177 leituras e 21.924 bytes solicitados, sem erro Win32. A coleta foi truncada e não executou a rechecagem final de propriedade; portanto não estabelece uma lista completa e estável de personagens. Os RVAs predominantes correspondem ao tipo genérico `IEntity`, que também representa objetos de cenário e peças anexas.
+
 ## Projeção derivada
 
 O binding `ICamera.GetScreenPointFromWorldPoint` encaminha para a função em RVA `0x00275DB0`. Ela subtrai a origem em `camera + 0x7C` e multiplica pelas três colunas dos primeiros nove floats de `ViewMatrix`. A câmera olha para Z negativo. Os campos `uint16` em `+0x408` e `+0x40A` fornecem largura e altura; a altura escala os dois eixos com FOV vertical. A origem de tela fica no canto superior esquerdo, com Y para baixo.
@@ -65,7 +67,18 @@ O diagnóstico percorre o nível padrão e os ativos, suas áreas raiz e subáre
 
 Para tipos `IEntity` conhecidos com base no deslocamento zero, o helper de `GetEntityPosition` em RVA `0x008977B0` soma a translação float em `+0x7C` à translação inteira assinada em `+0x1AC`. Somente quando os três inteiros são `INT32_MAX` a parcela inteira é zerada. O relatório inclui até 16 amostras com posição e projeção matemática, priorizando objetos com esqueleto sem classificá-los como jogadores. Tipos desconhecidos recebem apenas contagens por RVA de vtable e nenhuma leitura de campos tipados. Endereços absolutos de objetos e nomes de jogadores não são emitidos.
 
-Testes reproduzem `camera.World` nulo, níveis/áreas sem raiz, coleções sobrepostas, ciclos, mudanças durante a leitura, falhas de tipo, posições inválidas e limites globais. A nova cadeia ainda precisa ser testada no cliente em execução. As amostras privadas de posição não são publicadas neste repositório.
+O formato v3 também revalida as referências de propriedade e os cabeçalhos das coleções quando encontra o limite de nós. Nesse caso, `consistency_recheck_passed: true` significa que essas referências permaneceram iguais nas releituras; `collection_complete` continua falso. Nem essa rechecagem nem as leituras de posições produzem um snapshot atômico.
+
+## Campos adicionais de identidade
+
+- `ClientPlayer.PrincipleRole`: o wrapper `0x00D0E7A0` dereferencia o resultado do getter `0x00CFD9E0`, que aponta para `player + 0xDD8`. O ponteiro é usado somente para comparação de identidade com objetos observados e é rechecado no final. Sua ausência no prefixo coletado é informada, sem concluir que não existe personagem local.
+- `IEntity.CharCtrl`: o binding leva ao getter `0x0095BF30`, que lê o byte em `+0xA7`. O bit alto indica um índice de componente; quando presente, o ponteiro é obtido de `*(entity + 0x40) + (tag & 0x7F) * 8`. Só a presença é registrada, sem seguir esse componente ou deduzir equipe/vida.
+- `SkeletonComponent.ResourcePath`: binding em `0x05366E30`, wrapper `0x011C2B30`, ponteiro de membro em `0x05375750` e getter `0x00CC6F70`, com ajuste de objeto zero e campo em `skeleton + 0x240`. RTTI exige a vtable primária `0x04FA22A0`; a vtable secundária em `0x04FA2390` não autoriza essa leitura.
+- O adaptador de string em `0x0058B2A0` confirma comprimento/capacidade em `+0x10`/`+0x18`, armazenamento inline de até 15 caracteres e ponteiro para strings maiores. A leitura é limitada a 192 bytes, com rechecagem do cabeçalho. Só identificadores relativos ASCII são emitidos; caminhos absolutos, caracteres de controle e segmentos `..` são omitidos. Não são abertos arquivos nem lidos nomes de jogadores.
+
+O relatório agrupa até 32 identificadores de recurso e prioriza, nas amostras de posição, esqueletos não locais com controlador de movimento. Essa prioridade é uma assinatura técnica, não uma classificação de jogador ou inimigo. Armas, acessórios e objetos animados também podem ter esqueleto. Os novos campos ainda precisam de validação em execução.
+
+Testes reproduzem `camera.World` nulo, níveis/áreas sem raiz, coleções sobrepostas, ciclos, mudanças durante a leitura, falhas de tipo, posições inválidas, limites globais, rechecagem de prefixo, referência local alterada e leitura limitada de recursos. As amostras privadas de posição e os relatórios do usuário não são publicados neste repositório.
 
 ## Validação que falta
 

@@ -75,6 +75,7 @@ void collection(Memory& memory, std::uint64_t owner, std::uint64_t field,
 void entity(Memory& memory, std::uint64_t address, std::uint64_t aslr_base = base) {
     memory.put(address, aslr_base + sp::entity_vtables[2]);
     memory.put(address + 0xa1, std::uint8_t{0});
+    memory.put(address + 0xa7, std::uint8_t{0});
     memory.put(address + 0x7c, std::array<float, 3>{{10, 20, -30}});
     constexpr auto max = std::numeric_limits<std::int32_t>::max();
     memory.put(address + 0x1ac, std::array<std::int32_t, 3>{{max, max, max}});
@@ -99,6 +100,7 @@ Memory fixture(std::size_t count = 2, std::uint64_t aslr_base = base) {
     memory.put(gameplay + 0x58, player);
     memory.put(player, aslr_base + cp::player_vtable_rva);
     memory.put(player + 0xd88, camera);
+    memory.put(player + 0xdd8, count ? objects : std::uint64_t{0});
     memory.put(camera, aslr_base + sp::camera_vtable_rva);
     memory.put(camera + 0x41c, std::array<float, 12>{{1,0,0,0,1,0,0,0,1,0,0,0}});
     memory.put(camera + 0x454, std::array<float, 3>{{90,.1f,3000}});
@@ -150,6 +152,8 @@ int main() {
           result.read_bytes <= sp::max_bytes, "camera, collections and positions share one read budget");
     check(memory.read_counts[camera + 0x98] == 0,
           "detached camera.World is never read to locate the active scene");
+    check(result.local_role_present && result.local_role_observed && result.entities[0].is_local_role &&
+          !result.entities[1].is_local_role, "local role is identified by the verified pointer property");
     memory = fixture(); memory.fail_address = camera + 0x98;
     check(run(memory).collection_complete, "unreadable detached camera.World cannot block scenario.ActiveWorld");
     memory = fixture(0);
@@ -198,11 +202,34 @@ int main() {
     memory = fixture(); memory.put(objects + 0xa1, std::uint8_t{0x83});
     const std::uint64_t components = engine + 0x1000000;
     memory.put(objects + 0x40, components);
-    memory.put(components + 3 * 8, engine + 0x1100000);
+    const std::uint64_t skeleton = engine + 0x1100000;
+    memory.put(components + 3 * 8, skeleton);
+    memory.put(skeleton, base + sp::ei::skeleton_vtable_rva);
+    std::array<unsigned char, 32> resource_header{};
+    const std::string asset = "body.skel";
+    std::memcpy(resource_header.data(), asset.data(), asset.size());
+    const std::uint64_t asset_size = asset.size(), asset_capacity = 15;
+    std::memcpy(resource_header.data()+16, &asset_size, 8);
+    std::memcpy(resource_header.data()+24, &asset_capacity, 8);
+    memory.put(skeleton + 0x240, resource_header);
     result = run(memory);
     check(result.collection_complete && result.entities.size() == 2 && result.entities[0].skeleton_present &&
-          memory.read_counts[components + 3 * 8] == 1 && memory.read_counts[engine + 0x1100000] == 0,
-          "tagged skeleton component is located but never dereferenced");
+          result.entities[0].resource.path == asset && memory.read_counts[skeleton] == 1 &&
+          memory.read_counts[skeleton + 0x240] == 2,
+          "verified skeleton type authorizes the bounded technical asset field and metadata recheck");
+    memory.put(skeleton, base + 0x4fa2390); memory.read_counts.clear();
+    result = run(memory);
+    check(result.collection_complete && result.entities[0].resource.status == sp::ei::Status::unsupported_skeleton_type &&
+          memory.read_counts[skeleton + 0x240] == 0,
+          "unknown skeleton types retain entity data without a typed resource read");
+    memory = fixture();
+    memory.put(objects + 0xa7, std::uint8_t{0x82});
+    memory.put(objects + 0x40, components);
+    memory.put(components + 2 * 8, skeleton);
+    result = run(memory);
+    check(result.collection_complete && result.entities[0].character_controller_checked &&
+          result.entities[0].character_controller_present && memory.read_counts[skeleton] == 0,
+          "movement controller presence is read by its tagged component slot without following it");
     memory = fixture();
     memory.put(objects + 0x1ac, std::array<std::int32_t, 3>{{100,-10,25}});
     result = run(memory);
@@ -229,6 +256,8 @@ int main() {
     check(run(memory).status == sp::Status::snapshot_changed, "scenario changes are found by final root rechecks");
     memory = fixture(); memory.change_address = scenario + 0xd60;
     check(run(memory).status == sp::Status::snapshot_changed, "active world changes are found by final root rechecks");
+    memory = fixture(); memory.change_address = player + 0xdd8;
+    check(run(memory).status == sp::Status::snapshot_changed, "local role changes invalidate identity comparisons");
     memory = fixture(); memory.change_address = player + 0xd88;
     result = run(memory);
     check(result.status == sp::Status::snapshot_changed &&
@@ -252,9 +281,12 @@ int main() {
     memory = fixture(257);
     result = run(memory);
     check(result.status == sp::Status::node_limit_reached && result.entities.size() == 256 &&
-          !result.collection_complete && !result.consistency_recheck_passed &&
+          !result.collection_complete && result.consistency_recheck_passed &&
           result.read_count <= sp::max_reads && result.read_bytes <= sp::max_bytes,
-          "large entity collections are explicitly partial and respect all fixed budgets");
+          "large collections stay partial while observed prefix anchors are rechecked within budget");
+    memory = fixture(257); memory.change_address = scenario + 0xd60;
+    check(run(memory).status == sp::Status::snapshot_changed,
+          "a node cap cannot bypass the final active-world ownership recheck");
     memory = fixture(); result = run(memory, base, 1);
     check(result.status == sp::Status::node_limit_reached && result.entities.size() == 1,
           "caller can reduce the global entity traversal limit");
