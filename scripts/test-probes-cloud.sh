@@ -77,7 +77,7 @@ for name in ('camera', 'scene'):
     for scenario, expected in (('absent', 'client_not_running'),
                                ('wrong-build', 'build_file_size_mismatch')):
         report = json.loads((root / f'{name}-{scenario}.json').read_text())
-        expected_format = 'zyon-camera-candidate-v1' if name == 'camera' else 'zyon-scene-candidate-v3'
+        expected_format = 'zyon-camera-candidate-v1' if name == 'camera' else 'zyon-scene-candidate-v4'
         assert report['format'] == expected_format, report
         assert report['status'] == expected, report
         assert not report['file_sha256_matched'], report
@@ -101,6 +101,9 @@ assert len(fixture['resource_signatures']) == 32 and fixture['resource_signature
 assert all(item['resource_identifier'].startswith('actors/body_') for item in fixture['resource_signatures'])
 assert fixture['observed_native_types'][0]['character_controller_present'] == 40
 assert fixture['observed_native_types'][0]['local_roles'] == 1
-assert fixture['observed_skeleton_types'][0]['count'] == 40
+assert fixture['observed_native_types'][0]['actor_components'] == 20
+assert [item['count'] for item in fixture['observed_skeleton_types']] == [20, 20]
+assert fixture['position_samples'][0]['actor_component_present']
+assert fixture['position_samples'][0]['resource_source'] == 'animation_graph'
 print('Synthetic Windows JSON: identity fields, finite projections and output caps passed.')
 PY

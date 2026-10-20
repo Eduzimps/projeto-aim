@@ -11,6 +11,9 @@ namespace aim::entity_identity {
 namespace cp = camera_profile;
 
 inline constexpr std::uint64_t skeleton_vtable_rva = 0x04fa22a0;
+// Runtime-observed ActorComponent: RTTI COL0x6f72620 proves the complete
+// object and its SkeletonComponent base both have displacement zero.
+inline constexpr std::uint64_t actor_vtable_rva = 0x0559b8f8;
 inline constexpr std::size_t max_resource_bytes = 192;
 
 enum class Status {
@@ -38,7 +41,10 @@ struct Resource {
     Status status = Status::not_requested;
     std::uint64_t observed_vtable_rva = 0;
     std::string path;
+    const char* source = "model_resource";
 };
+
+enum class AssetField { model_resource, actor_graph };
 
 // Only relative ASCII asset identifiers are emitted. This excludes absolute
 // filesystem paths, quotes, control characters and parent traversal segments.
@@ -65,9 +71,10 @@ inline bool technical_resource(std::string& path) {
 // RVA0x58b2a0 uses the MSVC string size/capacity/SSO layout below. RTTI requires
 // the complete SkeletonComponent at displacement zero before reading the field.
 // The caller supplies the shared bounded reader; no string is evaluated or opened.
-inline Resource read_resource(std::uint64_t module_base, std::uint64_t skeleton,
-                              const cp::ReadBytes& reader) {
+inline Resource read_asset(std::uint64_t module_base, std::uint64_t skeleton,
+                            const cp::ReadBytes& reader, AssetField field) {
     Resource result;
+    result.source = field == AssetField::actor_graph ? "animation_graph" : "model_resource";
     const auto read_at = [&](std::uint64_t object, std::uint64_t offset,
                              void* destination, std::size_t bytes) {
         std::uint64_t location = 0;
@@ -83,11 +90,17 @@ inline Resource read_resource(std::uint64_t module_base, std::uint64_t skeleton,
     }
     if (!read_at(skeleton, 0, &vtable, sizeof(vtable))) return result;
     if (vtable >= module_base && vtable <= module_end) result.observed_vtable_rva = vtable - module_base;
-    if (vtable != module_base + skeleton_vtable_rva) {
+    const bool actor = vtable == module_base + actor_vtable_rva;
+    if ((!actor && vtable != module_base + skeleton_vtable_rva) ||
+        (field == AssetField::actor_graph && !actor)) {
         result.status = Status::unsupported_skeleton_type; return result;
     }
+    // ActorComponent.GraphPath binding0x5662b30 -> wrapper0x1e292d0
+    // -> membergetter0xce8150, adjustment0, this+0x3a0. It uses the same
+    // reflected string adapter as ResourcePath, but is an animation graph.
+    const std::uint64_t field_offset = field == AssetField::actor_graph ? 0x3a0 : 0x240;
     std::array<unsigned char, 32> header{}, rechecked{};
-    if (!read_at(skeleton, 0x240, header.data(), header.size())) return result;
+    if (!read_at(skeleton, field_offset, header.data(), header.size())) return result;
     std::uint64_t length = 0, capacity = 0, data = 0;
     std::memcpy(&data, header.data(), sizeof(data));
     std::memcpy(&length, header.data() + 16, sizeof(length));
@@ -110,12 +123,22 @@ inline Resource read_resource(std::uint64_t module_base, std::uint64_t skeleton,
             }
         }
     }
-    if (!read_at(skeleton, 0x240, rechecked.data(), rechecked.size())) return result;
+    if (!read_at(skeleton, field_offset, rechecked.data(), rechecked.size())) return result;
     if (header != rechecked) { result.status = Status::snapshot_changed; return result; }
     if (!length) { result.status = Status::empty_resource; return result; }
     if (!technical_resource(path)) { result.status = Status::nontechnical_resource; return result; }
     result.path = std::move(path);
     result.status = Status::resource_read;
     return result;
+}
+
+inline Resource read_resource(std::uint64_t module_base, std::uint64_t skeleton,
+                              const cp::ReadBytes& reader) {
+    auto resource = read_asset(module_base, skeleton, reader, AssetField::model_resource);
+    // Preserve a nonempty model identifier. Only a verified ActorComponent
+    // with an empty inherited field may use the separate graph field.
+    if (resource.status == Status::empty_resource && resource.observed_vtable_rva == actor_vtable_rva)
+        return read_asset(module_base, skeleton, reader, AssetField::actor_graph);
+    return resource;
 }
 } // namespace aim::entity_identity

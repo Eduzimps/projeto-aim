@@ -78,6 +78,10 @@ O formato v3 também revalida as referências de propriedade e os cabeçalhos da
 
 O relatório agrupa até 32 identificadores de recurso e prioriza, nas amostras de posição, esqueletos não locais com controlador de movimento. Essa prioridade é uma assinatura técnica, não uma classificação de jogador ou inimigo. Armas, acessórios e objetos animados também podem ter esqueleto. Os novos campos ainda precisam de validação em execução.
 
+O relatório v3 recebido encontrou a referência local, 7 objetos com controlador de movimento e 6 amostras não locais com esqueleto e controlador. A rechecagem de propriedade do prefixo passou, mas a coleta continuou incompleta no limite de 256 nós. Dos 27 esqueletos observados nesse recorte, 13 usavam `SkeletonComponent` e 14 usavam o RVA `0x0559B8F8`, então desconhecido pelo leitor de recursos. Nenhum identificador de recurso foi emitido.
+
+O RVA `0x0559B8F8` foi resolvido estaticamente: o COL `0x06F72620` identifica `ActorComponent`, com objeto completo e base `SkeletonComponent` no deslocamento zero. A versão v4 permite o campo herdado `ResourcePath` para esse tipo. Se o campo estiver vazio, lê separadamente `ActorComponent.GraphPath`: descritor `0x05662B30`, wrapper `0x01E292D0`, ponteiro de membro `0x05684260`, ajuste zero, getter `0x00CE8150`, campo `+0x3A0`. O tipo refletido usa o mesmo adaptador de string. O relatório informa `resource_source` como `model_resource` ou `animation_graph`; um grafo não é apresentado como recurso de modelo. Tipos secundários e desconhecidos continuam bloqueados para campos tipados. Esse suporte ainda precisa do próximo teste em execução.
+
 Testes reproduzem `camera.World` nulo, níveis/áreas sem raiz, coleções sobrepostas, ciclos, mudanças durante a leitura, falhas de tipo, posições inválidas, limites globais, rechecagem de prefixo, referência local alterada e leitura limitada de recursos. As amostras privadas de posição e os relatórios do usuário não são publicados neste repositório.
 
 ## Validação que falta

@@ -31,8 +31,10 @@ int main() {
         entity.is_local_role = index == 0;
         entity.position = {static_cast<double>(index), .5, -10};
         entity.resource.status = ei::Status::resource_read;
-        entity.resource.observed_vtable_rva = ei::skeleton_vtable_rva;
-        entity.resource.path = "actors/body_" + std::to_string(index) + ".skel";
+        const bool actor = index % 2 != 0;
+        entity.resource.observed_vtable_rva = actor ? ei::actor_vtable_rva : ei::skeleton_vtable_rva;
+        entity.resource.source = actor ? "animation_graph" : "model_resource";
+        entity.resource.path = "actors/body_" + std::to_string(index) + (actor ? ".graph" : ".skel");
         if (!ei::technical_resource(entity.resource.path)) return 1;
         scene.entities.push_back(entity);
     }

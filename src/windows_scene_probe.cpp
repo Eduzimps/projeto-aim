@@ -41,7 +41,7 @@ Report collect() {
 
 struct TypeCount {
     std::size_t count = 0, skeleton_checked = 0, skeleton_present = 0, position_checked = 0;
-    std::size_t controller_present = 0, local_roles = 0;
+    std::size_t controller_present = 0, local_roles = 0, actor_components = 0;
     bool native_entity_type_known = false;
 };
 
@@ -49,7 +49,7 @@ std::string json_report(const Report& report) {
     std::ostringstream json;
     json.imbue(std::locale::classic());
     json << std::boolalpha << std::setprecision(std::numeric_limits<double>::max_digits10);
-    json << "{\n  \"format\":\"zyon-scene-candidate-v3\",\n"
+    json << "{\n  \"format\":\"zyon-scene-candidate-v4\",\n"
          << "  \"validation\":\"static_scene_path_requires_runtime_confirmation\",\n"
          << "  \"status\":\"" << report.status << "\",\n"
          << "  \"win32_error\":" << report.error << ",\n"
@@ -112,6 +112,7 @@ std::string json_report(const Report& report) {
             type.position_checked += entity.position_checked ? 1 : 0;
             type.controller_present += entity.character_controller_present ? 1 : 0;
             type.local_roles += entity.is_local_role ? 1 : 0;
+            type.actor_components += entity.resource.observed_vtable_rva == ei::actor_vtable_rva ? 1 : 0;
         }
         json << ",\n  \"observed_native_types\":[";
         bool first = true;
@@ -125,7 +126,8 @@ std::string json_report(const Report& report) {
                  << ",\"skeleton_present\":" << type.skeleton_present
                  << ",\"position_checked\":" << type.position_checked
                  << ",\"character_controller_present\":" << type.controller_present
-                 << ",\"local_roles\":" << type.local_roles << '}';
+                 << ",\"local_roles\":" << type.local_roles
+                 << ",\"actor_components\":" << type.actor_components << '}';
         }
         json << ']';
         mp::Camera camera;
@@ -147,8 +149,10 @@ std::string json_report(const Report& report) {
                 json << "{\"sample\":" << ++samples << ",\"vtable_rva\":" << entity.vtable_rva
                      << ",\"skeleton_present\":" << entity.skeleton_present
                      << ",\"is_local_role\":" << entity.is_local_role
+                     << ",\"actor_component_present\":" << (entity.resource.observed_vtable_rva == ei::actor_vtable_rva)
                      << ",\"character_controller_present\":" << entity.character_controller_present
-                     << ",\"resource_status\":\"" << ei::status_name(entity.resource.status) << '"';
+                     << ",\"resource_status\":\"" << ei::status_name(entity.resource.status)
+                     << "\",\"resource_source\":\"" << entity.resource.source << '"';
                 if (entity.resource.status == ei::Status::resource_read)
                     json << ",\"resource_identifier\":\"" << entity.resource.path << '"';
                 json
@@ -163,12 +167,12 @@ std::string json_report(const Report& report) {
         }
         json << ']';
         struct ResourceCount { std::size_t count = 0, controllers = 0, local_roles = 0; };
-        std::map<std::string, ResourceCount> resources;
+        std::map<std::pair<std::string, std::string>, ResourceCount> resources;
         std::map<std::uint64_t, std::size_t> skeleton_types;
         for (const auto& entity : scene.entities) {
             if (entity.resource.observed_vtable_rva) ++skeleton_types[entity.resource.observed_vtable_rva];
             if (entity.resource.status != ei::Status::resource_read) continue;
-            auto& resource = resources[entity.resource.path];
+            auto& resource = resources[{entity.resource.source, entity.resource.path}];
             ++resource.count;
             resource.controllers += entity.character_controller_present ? 1 : 0;
             resource.local_roles += entity.is_local_role ? 1 : 0;
@@ -180,7 +184,8 @@ std::string json_report(const Report& report) {
             if (resource_count >= 32) break;
             if (resource_count++) json << ',';
             // Only validated relative ASCII asset identifiers reach this map.
-            json << "{\"resource_identifier\":\"" << entry.first << "\",\"count\":" << entry.second.count
+            json << "{\"resource_source\":\"" << entry.first.first
+                 << "\",\"resource_identifier\":\"" << entry.first.second << "\",\"count\":" << entry.second.count
                  << ",\"character_controller_present\":" << entry.second.controllers
                  << ",\"local_roles\":" << entry.second.local_roles << '}';
         }

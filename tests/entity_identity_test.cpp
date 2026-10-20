@@ -52,6 +52,21 @@ int main() {
     m = fixture("body\\a.skel");
     check(run(m).path == "body/a.skel", "relative asset separators are normalized for JSON");
     m = fixture(""); check(run(m).status == ei::Status::empty_resource, "empty resource is explicit");
+    m = fixture("body.skel"); m.put(skeleton, base + ei::actor_vtable_rva); result = run(m);
+    check(result.status == ei::Status::resource_read && result.path == "body.skel" &&
+          std::string(result.source) == "model_resource" && m.counts[skeleton+0x3a0] == 0,
+          "ActorComponent's proven base-at-zero permits its nonempty inherited model field");
+    m = fixture(""); m.put(skeleton, base + ei::actor_vtable_rva);
+    auto graph = fixture("anim/run.graph");
+    m.blocks[skeleton+0x3a0] = graph.blocks[skeleton+0x240];
+    result = run(m);
+    check(result.status == ei::Status::resource_read && result.path == "anim/run.graph" &&
+          std::string(result.source) == "animation_graph" && m.counts[skeleton+0x3a0] == 2,
+          "empty ActorComponent model falls back to the independently proven graph field");
+    m = fixture(""); result = ei::read_asset(base, skeleton,
+        [&](auto a, void* d, auto n) { return m.read(a,d,n); }, ei::AssetField::actor_graph);
+    check(result.status == ei::Status::unsupported_skeleton_type && m.counts[skeleton+0x3a0] == 0,
+          "a base SkeletonComponent never authorizes ActorComponent graph fields");
     m = fixture("body.skel"); m.put(skeleton, base + 0x4fa2390); result = run(m);
     check(result.status == ei::Status::unsupported_skeleton_type && m.counts[skeleton+0x240] == 0,
           "a secondary or unsupported vtable does not authorize a typed field read");
