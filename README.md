@@ -14,6 +14,8 @@ O diagnóstico separado `dist/zyon-camera-probe.exe` verifica a cadeia candidata
 
 `dist/zyon-scene-probe.exe` verifica o mundo ativo do cenário, independentemente do campo `World` da câmera. Examina o nível padrão e os níveis ativos, suas áreas raiz e subáreas imediatas. Os limites globais são 16 níveis, 32 áreas, 256 nós de entidades, 4.096 leituras e 64 KiB solicitados; novas leituras param após uma janela de 2 segundos. Salva `BloodStrike-scene-*.json` na Área de Trabalho. O formato v4 inclui contagens, referência ao personagem local, presença de controlador de movimento e identificadores relativos dos recursos de esqueleto, além de até 16 amostras de posição/projeção. Reconhece também o tipo derivado `ActorComponent` observado em execução e distingue recurso de modelo de grafo de animação. Esses campos ainda não identificam inimigos, equipes ou vida. Execute dentro do treinamento; limites atingidos, listas vazias ou alterações durante a leitura são informados no relatório.
 
+`dist/zyon-calibration.exe` é um teste visual de leitura: mostra pontos roxos nas origens dos candidatos com ator/esqueleto/controlador, excluindo a referência local. Abra o treinamento em modo janela ou janela sem bordas, execute o arquivo e volte ao jogo. **Insert** oculta/mostra os pontos; **End** encerra. O programa fecha sozinho após 120 segundos e se esconde quando o jogo perde o foco. Ele não controla entrada, desenha caixas ou mostra vida. A identificação de inimigos e equipes continua pendente. O objetivo é conferir se a projeção acompanha os bonecos na imagem real.
+
 - **Mira / Visual:** alterna entre as opções.
 - **FOV:** raio de 60 a 280 unidades visuais, escaladas com o DPI do Windows; não são graus de câmera.
 - **Força:** 1–100%; menor significa convergência mais lenta.
@@ -40,9 +42,10 @@ bash scripts/test.sh
 bash scripts/build-windows.sh
 bash scripts/build-camera-probe.sh
 bash scripts/build-scene-probe.sh
+bash scripts/build-calibration.sh
 ```
 
-Os comandos executam os testes portáteis e geram os três executáveis de `dist/` com MinGW x64 e avisos tratados como erros. `build/` e os arquivos temporários de `dist/` são ignorados pelo Git; os executáveis, a imagem da interface e o ZIP de distribuição são incluídos para download. `ZYON_MINGW_ROOT` permite escolher outro diretório do compilador e `CXX_WINDOWS` permite indicar um compilador MinGW já instalado.
+Os comandos executam os testes portáteis e geram os executáveis de `dist/` com MinGW x64 e avisos tratados como erros. `build/` e os arquivos temporários de `dist/` são ignorados pelo Git; os executáveis, a imagem da interface e o ZIP de distribuição são incluídos para download. `ZYON_MINGW_ROOT` permite escolher outro diretório do compilador e `CXX_WINDOWS` permite indicar um compilador MinGW já instalado.
 
 Para abrir a prévia internamente na nuvem ou testar a interface com Wine/Xvfb:
 

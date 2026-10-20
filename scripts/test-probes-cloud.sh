@@ -70,6 +70,12 @@ run_probe scene wrong-build
   -lbcrypt -lshell32 -lole32 -luser32
 "$runtime_root/usr/lib/wine/wine64" "$test_dir/scene-report-fixture.exe" \
   >"$test_dir/synthetic-report.json" 2>"$test_dir/synthetic-report.log"
+"$toolchain_root/usr/bin/x86_64-w64-mingw32-g++-posix" \
+  -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -DUNICODE -D_UNICODE \
+  -I"$project_dir/include" "$project_dir/tests/windows_calibration_render_fixture.cpp" \
+  -o "$test_dir/calibration-render-fixture.exe" -static -static-libgcc -static-libstdc++ \
+  -lgdi32 -lbcrypt -lshell32 -lole32 -luser32
+"$runtime_root/usr/lib/wine/wine64" "$test_dir/calibration-render-fixture.exe"
 python3 - "$test_dir" <<'PY'
 import json, pathlib, sys
 root = pathlib.Path(sys.argv[1])

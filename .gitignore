@@ -8,5 +8,6 @@ BloodStrike-analise-*/
 !/dist/zyon-preview.exe
 !/dist/zyon-camera-probe.exe
 !/dist/zyon-scene-probe.exe
+!/dist/zyon-calibration.exe
 !/dist/zyon-preview.png
 !/dist/zyon-windows-preview.zip
