@@ -14,6 +14,40 @@ struct Frame {
     std::vector<Marker> markers;
 };
 
+// Refresh the camera after the entity walk, sharing its remaining read budget.
+// This reduces camera age at presentation; live reads are still not atomic.
+inline bool refresh_camera(scene_profile::Result& scene, std::uint64_t module_base,
+                           std::uint64_t mapped_size, const camera_profile::ReadBytes& reader) {
+    const bool eligible = scene.camera_geometry_read && scene.scene_guards_matched &&
+        scene.consistency_recheck_passed;
+    scene.camera_geometry_read = false;
+    if (!eligible || !reader) return false;
+    const camera_profile::ReadBytes bounded = [&](auto address, void* destination, std::size_t bytes) {
+        if (scene.read_count >= scene_profile::max_reads ||
+            bytes > scene_profile::max_bytes - scene.read_bytes) return false;
+        ++scene.read_count; scene.read_bytes += bytes;
+        return reader(address,destination,bytes);
+    };
+    const auto latest = camera_profile::probe(module_base,mapped_size,bounded);
+    if (latest.status != camera_profile::ProbeStatus::candidate_sample ||
+        latest.camera_address != scene.camera_address) return false;
+    const auto read_at = [&](std::uint64_t offset, void* destination, std::size_t bytes) {
+        std::uint64_t address = 0;
+        return camera_profile::checked_address(latest.camera_address,offset,bytes,address) &&
+            bounded(address,destination,bytes);
+    };
+    std::uint64_t vtable = 0;
+    std::array<float,3> origin{};
+    std::array<std::uint16_t,2> viewport{};
+    if (!read_at(0,&vtable,sizeof(vtable)) || vtable != module_base + scene_profile::camera_vtable_rva ||
+        !read_at(0x7c,origin.data(),sizeof(origin)) ||
+        !read_at(0x408,viewport.data(),sizeof(viewport))) return false;
+    scene.camera_probe = latest; scene.origin = origin;
+    scene.viewport_width = viewport[0]; scene.viewport_height = viewport[1];
+    scene.camera_geometry_read = true;
+    return true;
+}
+
 inline bool supported_viewport(int width, int height) noexcept {
     return width > 0 && height > 0 && width <= 8192 && height <= 8192 &&
         static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height) <= 33554432;

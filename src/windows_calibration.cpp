@@ -11,6 +11,8 @@ namespace {
 constexpr wchar_t window_class[] = L"ZyonCalibrationWindow";
 constexpr COLORREF marker_color = RGB(169, 130, 255);
 constexpr ULONGLONG duration_ms = 120000;
+constexpr UINT refresh_interval_ms = 16;
+constexpr ULONGLONG max_sample_ms = 50;
 
 void draw_text(HDC dc, HFONT font, RECT rect, const std::wstring& text, COLORREF color) {
     const auto previous = SelectObject(dc, font);
@@ -94,14 +96,22 @@ struct App {
         wp::MemoryReader memory{session.process.value,0};
         const ULONGLONG start = GetTickCount64();
         const aim::camera_profile::ReadBytes reader = [&](auto address, void* destination, auto bytes) {
-            if (GetTickCount64()-start >= 2000) return false;
+            if (GetTickCount64()-start >= max_sample_ms) return false;
             return memory(address,destination,bytes);
         };
-        try { frame = cal::make_frame(sp::probe(session.base,session.mapped_size,reader),r.right,r.bottom); }
+        try {
+            auto scene = sp::probe(session.base,session.mapped_size,reader);
+            if (cal::refresh_camera(scene,session.base,session.mapped_size,reader) &&
+                GetTickCount64()-start < max_sample_ms)
+                frame = cal::make_frame(scene,r.right,r.bottom);
+            else frame = {};
+        }
         catch (...) { frame = {}; }
         SetWindowPos(overlay,HWND_TOPMOST,origin.x,origin.y,r.right,r.bottom,
                      SWP_NOACTIVATE | SWP_SHOWWINDOW);
         InvalidateRect(overlay,nullptr,FALSE);
+        // Present now instead of waiting behind the next timer message.
+        UpdateWindow(overlay);
     }
 };
 App* app = nullptr;
@@ -163,7 +173,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         app = nullptr; return 1;
     }
     state.started = GetTickCount64();
-    if (!SetTimer(state.overlay,1,100,nullptr)) DestroyWindow(state.overlay);
+    if (!SetTimer(state.overlay,1,refresh_interval_ms,nullptr)) DestroyWindow(state.overlay);
     MSG message{};
     while (GetMessageW(&message,nullptr,0,0)>0) { TranslateMessage(&message); DispatchMessageW(&message); }
     if (state.font) DeleteObject(state.font);

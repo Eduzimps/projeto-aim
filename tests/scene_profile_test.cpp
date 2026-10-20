@@ -1,4 +1,5 @@
 #include "aim/scene_profile.hpp"
+#include "aim/calibration_frame.hpp"
 
 #include <array>
 #include <cstdlib>
@@ -387,6 +388,32 @@ int main() {
     check(sp::probe(base, cp::image_size - 1, {}).status == sp::Status::invalid_module &&
           sp::probe(base, cp::image_size, {}).status == sp::Status::invalid_reader,
           "module and reader prerequisites stop before any collection read");
+    memory = fixture(); result = run(memory);
+    const cp::ReadBytes refresh_reader = [&](auto address, void* destination, auto bytes) {
+        return memory.read(address,destination,bytes);
+    };
+    memory.put(camera + 0x7c, std::array<float,3>{{11,22,33}});
+    memory.put(camera + 0x454, std::array<float,3>{{60,.1f,3000}});
+    check(aim::calibration::refresh_camera(result,base,cp::image_size,refresh_reader) &&
+          result.origin[0] == 11 && result.camera_probe.values.fov_degrees == 60 &&
+          result.read_count == memory.reads,
+          "late camera refresh uses current geometry and shares collection read accounting");
+    memory.fail_address = camera + 0x7c;
+    check(!aim::calibration::refresh_camera(result,base,cp::image_size,refresh_reader) &&
+          !result.camera_geometry_read &&
+          aim::calibration::make_frame(result,1920,1080).state == aim::calibration::State::unavailable,
+          "failed refresh clears presentation instead of retaining stale geometry");
+    memory = fixture(); result = run(memory);
+    memory.put(player + 0xd88, camera + 0x1000);
+    memory.put(camera + 0x1000, base + sp::camera_vtable_rva);
+    memory.put(camera + 0x141c, std::array<float,12>{{1,0,0,0,1,0,0,0,1,0,0,0}});
+    memory.put(camera + 0x1454, std::array<float,3>{{90,.1f,3000}});
+    check(!aim::calibration::refresh_camera(result,base,cp::image_size,refresh_reader),
+          "camera replacement during collection is not combined with the old scene");
+    memory = fixture(); result = run(memory); result.read_count = sp::max_reads;
+    const auto before_refresh = memory.reads;
+    check(!aim::calibration::refresh_camera(result,base,cp::image_size,refresh_reader) &&
+          memory.reads == before_refresh, "late refresh cannot exceed the global read budget");
     if (failures) { std::cerr << failures << " scene profile check(s) failed\n"; return EXIT_FAILURE; }
     std::cout << "All scene profile checks passed\n";
     return EXIT_SUCCESS;
