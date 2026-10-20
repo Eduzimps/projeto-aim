@@ -16,6 +16,8 @@ O diagnóstico separado `dist/zyon-camera-probe.exe` verifica a cadeia candidata
 
 `dist/zyon-calibration.exe` é um teste visual de leitura: mostra pontos roxos nas origens dos candidatos com ator/esqueleto/controlador, excluindo a referência local. Abra o treinamento em modo janela ou janela sem bordas, execute o arquivo e volte ao jogo. **Insert** oculta/mostra os pontos; **End** encerra. O programa fecha sozinho após 120 segundos e se esconde quando o jogo perde o foco. Ele não controla entrada, desenha caixas ou mostra vida. A identificação de inimigos e equipes continua pendente. O objetivo é conferir se a projeção acompanha os bonecos na imagem real.
 
+`dist/zyon-state-compare.exe` prepara uma comparação exploratória de três fases no treinamento. Volte ao jogo, aponte o centro da tela para os pés de um único boneco e pressione **F6** enquanto ele está vivo. Mate esse boneco e pressione **F7**; essa fase segue a referência escolhida em F6. Quando reaparecer, aponte novamente para seus pés e pressione **F8**. Um sinal curto confirma a captura; uma seleção ambígua ou leitura inválida permite repetir a tecla. F6 reinicia as fases. F8 salva `BloodStrike-comparacao-*.json` na Área de Trabalho e encerra; End ou o prazo de cinco minutos salvam o que houver. As teclas F6–F8 só são observadas enquanto o jogo está em primeiro plano. O JSON compara um prefixo nativo limitado, sem emitir endereços remotos, e não interpreta as diferenças como vida. Os rótulos vivo/morto/reaparecido são fornecidos pelo usuário. Se as referências mudarem ou uma fase estiver ausente, não compara os campos como se fossem o mesmo objeto.
+
 - **Mira / Visual:** alterna entre as opções.
 - **FOV:** raio de 60 a 280 unidades visuais, escaladas com o DPI do Windows; não são graus de câmera.
 - **Força:** 1–100%; menor significa convergência mais lenta.
@@ -43,6 +45,7 @@ bash scripts/build-windows.sh
 bash scripts/build-camera-probe.sh
 bash scripts/build-scene-probe.sh
 bash scripts/build-calibration.sh
+bash scripts/build-state-compare.sh
 ```
 
 Os comandos executam os testes portáteis e geram os executáveis de `dist/` com MinGW x64 e avisos tratados como erros. `build/` e os arquivos temporários de `dist/` são ignorados pelo Git; os executáveis, a imagem da interface e o ZIP de distribuição são incluídos para download. `ZYON_MINGW_ROOT` permite escolher outro diretório do compilador e `CXX_WINDOWS` permite indicar um compilador MinGW já instalado.
@@ -58,7 +61,7 @@ bash scripts/start-preview-cloud.sh
 
 O teste de interface usa um prefixo Wine temporário e display separados, sem alterar as preferências de uma prévia já aberta. Verifica controles, salvamento, reabertura e redimensionamento. O último comando mantém a janela aberta em um display virtual; não publica uma página ou link de acesso. Os processos precisam ser iniciados novamente em tarefas futuras.
 
-Validação da prévia: compilação x64 concluída, suíte matemática aprovada e **23 verificações de interface aprovadas no Wine 10 com Xvfb a 96 DPI**. O teste separado dos diagnósticos verifica ausência do jogo, rejeição de outro executável e correspondência entre JSON do terminal e da Área de Trabalho. O primeiro teste real de cena mostrou `camera.World` nulo. O segundo acessou o mundo ativo, leu posições de 256 objetos e encontrou 35 com esqueleto, parando no limite de coleta. O terceiro encontrou a referência local e seis amostras não locais com esqueleto/controlador; os recursos dos modelos ficaram vazios ou bloqueados por um tipo derivado, agora reconhecido como `ActorComponent`. O suporte aos recursos desse tipo na versão v4 ainda precisa de teste em execução. A identificação de inimigos, equipes e vida continua pendente.
+Validação da prévia: compilação x64 concluída, suíte matemática aprovada e **23 verificações de interface aprovadas no Wine 10 com Xvfb a 96 DPI**. O teste separado dos diagnósticos verifica ausência do jogo, rejeição de outro executável e correspondência entre JSON do terminal e da Área de Trabalho. O primeiro teste real de cena mostrou `camera.World` nulo. O segundo acessou o mundo ativo, leu posições de 256 objetos e encontrou 35 com esqueleto, parando no limite de coleta. O terceiro encontrou a referência local e seis amostras não locais com esqueleto/controlador; os recursos dos modelos ficaram vazios ou bloqueados por um tipo derivado, agora reconhecido como `ActorComponent`. O relatório v4 confirmou a leitura desse tipo, mas seus campos de modelo e grafo vieram vazios. O usuário confirmou o alinhamento dos pontos após a redução do intervalo de atualização e relatou que o ponto continua presente após a morte do boneco. A identificação de inimigos, equipes e vida continua pendente.
 
 ## O que foi implementado
 
@@ -74,7 +77,7 @@ Os anexos `bloodstrike-dump.md` e `bloodstrike-offsets.json` contêm a mesma lis
 
 O executável recebido depois foi reconstruído com SHA256 verificado e contém interfaces Messiah/Python. A cadeia de câmera derivada desse arquivo produziu três amostras coerentes no teste enviado pelo usuário. Os offsets antigos não foram reutilizados. Veja o relatório de análise acima.
 
-Ainda faltam validar a enumeração de cena em execução, identificar quais objetos representam jogadores, separar equipes, obter posições globais/ossos e confirmar os tipos e a origem dos valores de vida. A fórmula de projeção foi rastreada no código e testada com coordenadas analíticas; seu alinhamento com a imagem do jogo ainda precisa ser conferido. Os endereços enviados não foram substituídos por palpites.
+A enumeração parcial de cena e o alinhamento visual dos pontos foram observados em execução. Ainda faltam identificar com segurança quais objetos representam jogadores, separar equipes, obter ossos e confirmar os tipos e a origem dos valores de vida. A presença de um ponto não estabelece que o boneco esteja vivo. Os endereços enviados não foram substituídos por palpites.
 
 A prévia visual não se conecta ao processo do jogo. Os diagnósticos separados fazem leituras limitadas, com verificação da build e sem alterar memória ou controlar entrada. A compilação e os testes matemáticos não validam ESP ou aimbot dentro de Blood Strike.
 

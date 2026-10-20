@@ -63,6 +63,7 @@ inline const char* status_name(Status status) noexcept {
 }
 
 struct EntitySummary {
+    std::uint64_t object_address = 0; // Session-local only; never serialize.
     std::uint64_t vtable_rva = 0;
     bool native_entity_type_known = false;
     bool skeleton_checked = false;
@@ -267,6 +268,7 @@ inline Result probe(std::uint64_t module_base, std::uint64_t mapped_size,
                 result.status = Status::entity_vtable_outside_rdata; return result;
             }
             EntitySummary entity;
+            entity.object_address = object;
             entity.is_local_role = object == local_role;
             result.local_role_observed = result.local_role_observed || entity.is_local_role;
             entity.vtable_rva = entity_vtable - module_base;

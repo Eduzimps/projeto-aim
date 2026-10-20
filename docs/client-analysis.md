@@ -90,16 +90,25 @@ O relatório v4 recebido passou na leitura e rechecagem do prefixo. As seis amos
 
 Só exibe candidatos nativos conhecidos com `ActorComponent`, esqueleto e controlador, diferentes da referência local, em uma amostra cuja rechecagem de propriedade passou. Pontos fora do viewport ou dos planos near/far são descartados antes da conversão para pixels inteiros; isso evita rasterizar as coordenadas enormes de pontos quase sobre o plano da câmera. Divergência entre viewport e janela suspende os marcadores. O limite de desenho é 64 pontos; a coleta permanece parcial quando encontra o limite de 256 nós.
 
-O filtro é técnico e não estabelece jogadores/inimigos. Os marcadores não são caixas, ossos, barras de vida ou pontos de mira. A seleção/projeção foi testada com dados analíticos, e o desenho/callbacks de transparência foram exercitados com GDI no Wine. A contagem de recursos GDI não está disponível nesse Wine. O alinhamento e o comportamento da sobreposição no Blood Strike ainda precisam da conferência do usuário.
+O filtro é técnico e não estabelece jogadores/inimigos. Os marcadores não são caixas, ossos, barras de vida ou pontos de mira. A seleção/projeção foi testada com dados analíticos, e o desenho/callbacks de transparência foram exercitados com GDI no Wine. A contagem de recursos GDI não está disponível nesse Wine. O usuário confirmou o alinhamento visual depois de reduzir o intervalo para 16 ms e renovar a câmera ao final da coleta. Relatou também que o ponto permanece após a morte do boneco; isso não confirma um estado de vida.
 
 Testes reproduzem `camera.World` nulo, níveis/áreas sem raiz, coleções sobrepostas, ciclos, mudanças durante a leitura, falhas de tipo, posições inválidas, limites globais, rechecagem de prefixo, referência local alterada e leitura limitada de recursos. As amostras privadas de posição e os relatórios do usuário não são publicados neste repositório.
 
 ## Validação que falta
 
-- Conferir o alinhamento da projeção com a imagem exibida; origem e dimensões já foram lidas no relatório recebido.
 - Confirmar o caminho de cena em execução e sua cobertura dos objetos relevantes.
 - Identificar a coleção de jogadores e separar entidades de cenário, aliados e inimigos.
 - Identificar vida atual/máxima e estados de jogador. As ocorrências de health examinadas pertencem a objetos destrutíveis e não estabelecem a vida dos jogadores.
 - Validar posições/ossos e correspondência entre pixels e orientação da câmera.
 
-O diagnóstico de cena é a próxima verificação no Windows. O painel continua sendo uma prévia com alvos sintéticos; ESP e aimbot no jogo ainda não foram demonstrados.
+A comparação de fases abaixo é a próxima verificação no Windows. O painel continua sendo uma prévia com alvos sintéticos; ESP e aimbot no jogo ainda não foram demonstrados.
+
+## Comparação exploratória de fases
+
+`zyon-state-compare.exe` usa F6/F7/F8 para rótulos fornecidos pelo usuário, sem validar vida, morte ou reaparecimento. F6 seleciona um candidato próximo do centro da câmera (até 240 pixels e margem mínima de 16 pixels para o segundo candidato); F7 procura a mesma referência na nova coleção. F8 seleciona novamente o candidato indicado pelo usuário. Não deduz continuidade se o endereço mudar. Mesmo um endereço igual pode ter sido reutilizado; não é prova de identidade ou tempo de vida da alocação. Uma coleta parcial sem a referência é informada como não observada, sem declarar destruição ou morte.
+
+A coleta exige os mesmos guards e limites globais da cena: 4.096 leituras e 64 KiB solicitados, com janela de início de leituras de dois segundos por fase. Somente o IEntity genérico de vtable RVA `0x04F2A180` pode fornecer o prefixo. Lê 440 bytes (`0x1B8`), terminando nos campos de tradução inteira já verificados, com vtable conferida antes, dentro e depois do bloco. Não segue ponteiros dos bytes capturados, nem percorre componentes ou objetos Python adicionais. As observações continuam sem atomicidade.
+
+O JSON contém no máximo 64 diferenças de palavras de 32 bits entre as três fases, somente quando todas foram capturadas no mesmo endereço nativo. Mostra interpretações u32/f32; floats não finitos aparecem como null. Omite os campos de tradução conhecidos e qualquer slot alinhado de oito bytes que tenha aparência de ponteiro em alguma fase; essa filtragem conservadora também pode omitir escalares. Não serializa o prefixo bruto, ponteiros remotos ou strings de memória. Mudanças de animação, estado nativo, temporizadores e padding não estabelecem um campo de vida. A vida pode estar fora desse prefixo, inclusive nos scripts ou componentes; um relatório sem diferenças úteis é possível.
+
+Testes sintéticos cobrem seleção ambígua, exclusão local, cena instável, alvo não observado em coleta parcial, mudança de tipo durante leitura, limites compartilhados, omissão de ponteiros e comparação impedida entre referências diferentes. O teste Windows também confere JSON e rejeição de jogo ausente ou build diferente. A captura real das três fases ainda depende do teste do usuário.

@@ -38,6 +38,13 @@ run_probe() {
 }
 run_probe camera absent
 run_probe scene absent
+run_comparison() {
+  local scenario="$1" result=0
+  "$runtime_root/usr/lib/wine/wine64" "$project_dir/dist/zyon-state-compare.exe" \
+    >"$test_dir/comparison-${scenario}.txt" 2>"$test_dir/comparison-${scenario}.log" || result=$?
+  test "$result" -eq 1
+}
+run_comparison absent
 # This fixture is our own tiny program, never the uploaded game executable.
 cat > "$test_dir/fixture.cpp" <<'EOF'
 #define WIN32_LEAN_AND_MEAN
@@ -63,6 +70,7 @@ done
 rg -q 'fixture-ready' "$test_dir/fixture.log"
 run_probe camera wrong-build
 run_probe scene wrong-build
+run_comparison wrong-build
 "$toolchain_root/usr/bin/x86_64-w64-mingw32-g++-posix" \
   -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -DUNICODE -D_UNICODE \
   -I"$project_dir/include" "$project_dir/tests/windows_scene_report_fixture.cpp" \
@@ -76,9 +84,25 @@ run_probe scene wrong-build
   -o "$test_dir/calibration-render-fixture.exe" -static -static-libgcc -static-libstdc++ \
   -lgdi32 -lbcrypt -lshell32 -lole32 -luser32
 "$runtime_root/usr/lib/wine/wine64" "$test_dir/calibration-render-fixture.exe"
+"$toolchain_root/usr/bin/x86_64-w64-mingw32-g++-posix" \
+  -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+  -I"$project_dir/include" "$project_dir/tests/windows_state_report_fixture.cpp" \
+  -o "$test_dir/state-report-fixture.exe" -static -static-libgcc -static-libstdc++
+"$runtime_root/usr/lib/wine/wine64" "$test_dir/state-report-fixture.exe" \
+  >"$test_dir/state-report.json" 2>"$test_dir/state-report.log"
 python3 - "$test_dir" <<'PY'
 import json, pathlib, sys
 root = pathlib.Path(sys.argv[1])
+for scenario, expected in (('absent','client_not_running'),('wrong-build','build_file_size_mismatch')):
+    assert expected in (root / f'comparison-{scenario}.log').read_text()
+state = json.loads((root / 'state-report.json').read_text())
+assert state['format'] == 'zyon-state-comparison-v1'
+assert state['same_native_address_all_phases'] and state['labels_are_user_supplied']
+assert len(state['changes']) == 2
+assert state['changes'][0]['offset'] == 0x90 and state['changes'][0]['f32'] == [100,0,100]
+assert state['changes'][1]['f32'] == [0,None,0]
+assert '2199023255552' not in (root / 'state-report.json').read_text()
+print('State comparison: absent/wrong build rejected; Windows JSON and finite numbers passed.')
 for name in ('camera', 'scene'):
     for scenario, expected in (('absent', 'client_not_running'),
                                ('wrong-build', 'build_file_size_mismatch')):
