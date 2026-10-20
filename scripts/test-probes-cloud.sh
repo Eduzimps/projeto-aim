@@ -70,6 +70,8 @@ for name in ('camera', 'scene'):
     for scenario, expected in (('absent', 'client_not_running'),
                                ('wrong-build', 'build_file_size_mismatch')):
         report = json.loads((root / f'{name}-{scenario}.json').read_text())
+        expected_format = 'zyon-camera-candidate-v1' if name == 'camera' else 'zyon-scene-candidate-v2'
+        assert report['format'] == expected_format, report
         assert report['status'] == expected, report
         assert not report['file_sha256_matched'], report
         if scenario == 'wrong-build':

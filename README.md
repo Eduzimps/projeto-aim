@@ -12,7 +12,7 @@ No Windows x64, abra `dist/zyon-preview.exe`. O executável é independente de r
 
 O diagnóstico separado `dist/zyon-camera-probe.exe` verifica a cadeia candidata de câmera para a build analisada. Com o jogo aberto, ele produz `BloodStrike-camera-*.json` na Área de Trabalho. A análise estática e suas limitações estão em [docs/client-analysis.md](docs/client-analysis.md). O diagnóstico ainda não fornece ESP ou aimbot.
 
-`dist/zyon-scene-probe.exe` é a próxima verificação: lê a origem e as dimensões da câmera e examina até 256 objetos da área raiz do nível padrão. Salva `BloodStrike-scene-*.json` na Área de Trabalho. Os identificadores de tipos relatados ainda não distinguem jogadores, equipes ou vida. Execute dentro do treinamento; listas vazias, incompletas ou alteradas durante a leitura são informadas no relatório.
+`dist/zyon-scene-probe.exe` verifica o mundo ativo do cenário, independentemente do campo `World` da câmera. Examina o nível padrão e os níveis ativos, suas áreas raiz e subáreas imediatas. Os limites globais são 16 níveis, 32 áreas, 256 nós de entidades, 4.096 leituras e 64 KiB solicitados; novas leituras param após uma janela de 2 segundos. Salva `BloodStrike-scene-*.json` na Área de Trabalho. O formato v2 inclui contagens e até 16 amostras de posição/projeção para tipos nativos conhecidos. Esses tipos e a presença de esqueleto ainda não identificam jogadores, equipes ou vida. Execute dentro do treinamento; limites atingidos, listas vazias ou alterações durante a leitura são informados no relatório.
 
 - **Mira / Visual:** alterna entre as opções.
 - **FOV:** raio de 60 a 280 unidades visuais, escaladas com o DPI do Windows; não são graus de câmera.
@@ -55,7 +55,7 @@ bash scripts/start-preview-cloud.sh
 
 O teste de interface usa um prefixo Wine temporário e display separados, sem alterar as preferências de uma prévia já aberta. Verifica controles, salvamento, reabertura e redimensionamento. O último comando mantém a janela aberta em um display virtual; não publica uma página ou link de acesso. Os processos precisam ser iniciados novamente em tarefas futuras.
 
-Validação da prévia: compilação x64 concluída, suíte matemática aprovada e **23 verificações de interface aprovadas no Wine 10 com Xvfb a 96 DPI**. O teste separado dos diagnósticos verifica ausência do jogo, rejeição de outro executável e correspondência entre JSON do terminal e da Área de Trabalho. O usuário enviou três amostras de câmera lidas no Windows durante o treinamento, com identidade da build e verificações de objetos aprovadas. Isso ainda não comprova alinhamento da projeção, identificação de jogadores, ESP ou aimbot.
+Validação da prévia: compilação x64 concluída, suíte matemática aprovada e **23 verificações de interface aprovadas no Wine 10 com Xvfb a 96 DPI**. O teste separado dos diagnósticos verifica ausência do jogo, rejeição de outro executável e correspondência entre JSON do terminal e da Área de Trabalho. O usuário enviou amostras de câmera lidas no Windows, com identidade da build e verificações de objetos aprovadas. O primeiro teste de cena mostrou `camera.World` nulo; a versão v2 usa o mundo ativo do cenário e tem um teste de regressão para esse caso. A leitura real da nova cadeia e a identificação de jogadores/vida ainda não foram confirmadas.
 
 ## O que foi implementado
 

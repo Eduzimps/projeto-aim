@@ -1,5 +1,6 @@
 #include "aim/windows_probe_support.hpp"
 #include "aim/scene_profile.hpp"
+#include "aim/messiah_projection.hpp"
 
 #include <iostream>
 #include <locale>
@@ -8,6 +9,7 @@
 namespace cp = aim::camera_profile;
 namespace sp = aim::scene_profile;
 namespace wp = aim::windows_probe;
+namespace mp = aim::messiah_projection;
 namespace {
 
 constexpr ULONGLONG memory_duration_ms = 2000;
@@ -37,15 +39,15 @@ Report collect() {
 }
 
 struct TypeCount {
-    std::size_t count = 0, skeleton_checked = 0, skeleton_present = 0;
+    std::size_t count = 0, skeleton_checked = 0, skeleton_present = 0, position_checked = 0;
     bool native_entity_type_known = false;
 };
 
 std::string json_report(const Report& report) {
     std::ostringstream json;
     json.imbue(std::locale::classic());
-    json << std::boolalpha << std::setprecision(std::numeric_limits<float>::max_digits10);
-    json << "{\n  \"format\":\"zyon-scene-candidate-v1\",\n"
+    json << std::boolalpha << std::setprecision(std::numeric_limits<double>::max_digits10);
+    json << "{\n  \"format\":\"zyon-scene-candidate-v2\",\n"
          << "  \"validation\":\"static_scene_path_requires_runtime_confirmation\",\n"
          << "  \"status\":\"" << report.status << "\",\n"
          << "  \"win32_error\":" << report.error << ",\n"
@@ -57,13 +59,17 @@ std::string json_report(const Report& report) {
          << "  \"file_sha256_matched\":" << report.file_sha256_matched << ",\n"
          << "  \"mapped_image_size_matched\":" << report.image_size_matched << ",\n"
          << "  \"observed_file_sha256\":\"" << report.observed_sha256 << "\",\n"
-         << "  \"limits\":{\"nodes\":" << sp::max_nodes << ",\"read_attempts\":" << sp::max_reads
+         << "  \"world_source\":\"gameplay_scenario_active_world\",\n"
+         << "  \"limits\":{\"entity_nodes\":" << sp::max_nodes
+         << ",\"levels\":" << sp::max_levels << ",\"areas\":" << sp::max_areas
+         << ",\"read_attempts\":" << sp::max_reads
          << ",\"requested_bytes\":" << sp::max_bytes
          << ",\"memory_read_start_window_ms\":" << memory_duration_ms << "},\n"
          << "  \"scene_attempted\":" << report.scene_attempted;
     if (report.scene_attempted) {
         const auto& scene = report.scene;
         json << ",\n  \"scene\":{\"stage\":\"" << scene.stage
+             << "\",\"detail_stage\":\"" << scene.detail_stage
              << "\",\"camera_status\":\"" << cp::status_name(scene.camera_probe.status)
              << "\",\"camera_stage\":\"" << scene.camera_probe.stage
              << "\",\"camera_vtable_rva\":" << scene.observed_camera_vtable_rva
@@ -72,6 +78,9 @@ std::string json_report(const Report& report) {
              << ",\"collection_complete\":" << scene.collection_complete
              << ",\"read_attempts\":" << scene.read_count
              << ",\"requested_bytes\":" << scene.read_bytes
+             << ",\"levels_observed\":" << scene.levels_observed
+             << ",\"areas_observed\":" << scene.areas_observed
+             << ",\"entity_nodes_observed\":" << scene.entity_nodes_observed
              << ",\"objects_observed\":" << scene.entities.size() << "},\n"
              << "  \"camera_geometry_read\":" << scene.camera_geometry_read;
         if (scene.camera_geometry_read) {
@@ -94,6 +103,7 @@ std::string json_report(const Report& report) {
             type.native_entity_type_known = entity.native_entity_type_known;
             type.skeleton_checked += entity.skeleton_checked ? 1 : 0;
             type.skeleton_present += entity.skeleton_present ? 1 : 0;
+            type.position_checked += entity.position_checked ? 1 : 0;
         }
         json << ",\n  \"observed_native_types\":[";
         bool first = true;
@@ -104,13 +114,40 @@ std::string json_report(const Report& report) {
             json << "{\"vtable_rva\":" << entry.first << ",\"count\":" << type.count
                  << ",\"native_entity_type_known\":" << type.native_entity_type_known
                  << ",\"skeleton_checked\":" << type.skeleton_checked
-                 << ",\"skeleton_present\":" << type.skeleton_present << '}';
+                 << ",\"skeleton_present\":" << type.skeleton_present
+                 << ",\"position_checked\":" << type.position_checked << '}';
+        }
+        json << ']';
+        mp::Camera camera;
+        std::copy_n(scene.camera_probe.values.view43.begin(), 9, camera.rotation.begin());
+        camera.origin = {scene.origin[0], scene.origin[1], scene.origin[2]};
+        camera.viewport = {static_cast<double>(scene.viewport_width), static_cast<double>(scene.viewport_height)};
+        camera.vertical_fov_degrees = scene.camera_probe.values.fov_degrees;
+        json << ",\n  \"position_samples\":[";
+        std::size_t samples = 0;
+        // Prioritize entities with a skeleton, without classifying them as players.
+        for (bool prefer_skeleton : {true, false}) {
+            for (const auto& entity : scene.entities) {
+                if (!entity.position_checked || entity.skeleton_present != prefer_skeleton || samples >= 16) continue;
+                if (samples) json << ',';
+                const auto projected = mp::project(entity.position, camera);
+                json << "{\"sample\":" << ++samples << ",\"vtable_rva\":" << entity.vtable_rva
+                     << ",\"skeleton_present\":" << entity.skeleton_present
+                     << ",\"world_position\":[" << entity.position.x << ',' << entity.position.y
+                     << ',' << entity.position.z << "],\"projection_available\":" << projected.has_value();
+                if (projected) {
+                    json << ",\"screen_pixel\":[" << projected->pixel.x << ',' << projected->pixel.y
+                         << "],\"depth\":" << projected->depth << ",\"in_viewport\":" << projected->in_viewport;
+                }
+                json << '}';
+            }
         }
         json << ']';
     }
-    json << ",\n  \"limitations\":\"Default-level root area only; live non-atomic observation. "
+    json << ",\n  \"limitations\":\"Default and active levels, root and immediate subareas only; live non-atomic observation. "
          << "Partial results may be incomplete or stale. Native types and skeleton presence do not "
-         << "identify players, enemies, health or bones. No ESP or input control.\"\n}\n";
+         << "identify players, enemies, health or bones. Position and projection candidates need live alignment verification. "
+         << "No ESP or input control.\"\n}\n";
     return json.str();
 }
 

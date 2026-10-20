@@ -1,25 +1,33 @@
 #pragma once
 
 #include "aim/camera_profile.hpp"
+#include "aim/scene_collections.hpp"
+#include "aim/entity_position.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include <utility>
 
 namespace aim::scene_profile {
 
 namespace cp = camera_profile;
+namespace sc = scene_collections;
+namespace ep = entity_position;
 // These are build-specific native RTTI primary vtables, not player classes.
 inline constexpr std::uint64_t camera_vtable_rva = 0x04e57558;
+inline constexpr std::uint64_t scenario_vtable_rva = 0x04fa1ce8;
 inline constexpr std::uint64_t world_vtable_rva = 0x04eca2e0;
 inline constexpr std::array<std::uint64_t, 2> level_vtables{{0x04f2b1b0, 0x04f2b208}};
 inline constexpr std::uint64_t area_vtable_rva = 0x04eca310;
 inline constexpr std::array<std::uint64_t, 6> entity_vtables{{
     0x04e57558, 0x04e57df8, 0x04f2a180, 0x0559a1c0, 0x055cd200, 0x055cd750}};
 inline constexpr std::size_t max_nodes = 256;
-inline constexpr std::size_t max_reads = 2048;
+inline constexpr std::size_t max_levels = 16;
+inline constexpr std::size_t max_areas = 32;
+inline constexpr std::size_t max_reads = 4096;
 inline constexpr std::size_t max_bytes = 65536;
 
 enum class Status {
@@ -27,7 +35,7 @@ enum class Status {
     null_pointer, invalid_address, read_failed, read_budget_exceeded,
     vtable_mismatch, camera_type_unrecognized, invalid_camera_geometry,
     entity_vtable_outside_rdata, list_cycle, list_links_inconsistent,
-    node_limit_reached, snapshot_changed
+    node_limit_reached, snapshot_changed, invalid_entity_position
 };
 inline const char* status_name(Status status) noexcept {
     switch (status) {
@@ -47,6 +55,7 @@ inline const char* status_name(Status status) noexcept {
     case Status::list_links_inconsistent: return "list_links_inconsistent";
     case Status::node_limit_reached: return "node_limit_reached";
     case Status::snapshot_changed: return "snapshot_changed";
+    case Status::invalid_entity_position: return "invalid_entity_position";
     }
     return "unknown";
 }
@@ -56,10 +65,13 @@ struct EntitySummary {
     bool native_entity_type_known = false;
     bool skeleton_checked = false;
     bool skeleton_present = false;
+    bool position_checked = false;
+    Vec3 position;
 };
 struct Result {
     Status status = Status::invalid_module;
     const char* stage = "module";
+    const char* detail_stage = "none";
     cp::ProbeResult camera_probe;
     std::uint64_t camera_address = 0; // Internal only; do not serialize remote addresses.
     std::uint64_t observed_camera_vtable_rva = 0;
@@ -70,10 +82,13 @@ struct Result {
     bool consistency_recheck_passed = false;
     bool collection_complete = false;
     std::size_t read_count = 0, read_bytes = 0;
+    std::size_t levels_observed = 0, areas_observed = 0;
+    std::size_t entity_nodes_observed = 0;
     std::vector<EntitySummary> entities;
 };
 
-// Observes only the active camera's World.DefaultLevel.RootArea.Entities.
+// Observes ClientScenario.ActiveWorld, its default/active levels, and each
+// level's root and immediate subareas. The camera may legitimately be detached.
 // The list is live: rechecks detect some mutations but do not make an atomic snapshot.
 inline Result probe(std::uint64_t module_base, std::uint64_t mapped_size,
                     const cp::ReadBytes& reader, std::size_t node_limit = max_nodes) {
@@ -122,7 +137,8 @@ inline Result probe(std::uint64_t module_base, std::uint64_t mapped_size,
         if (actual != module_base + expected) { result.status = Status::vtable_mismatch; return false; }
         return true;
     };
-    std::array<std::uint64_t, 8> roots{}; // engine, gameplay, player, camera, world, level, area, sentinel
+    // The world belongs to the active scenario, not necessarily to the camera.
+    std::array<std::uint64_t, 6> roots{}; // engine, gameplay, player, camera, scenario, world
     if (!read_pointer(module_base, cp::engine_global_rva, roots[0], "engine_global") ||
         !exact_vtable(roots[0], cp::engine_vtable_rva, "engine_vtable") ||
         !read_pointer(roots[0], 0x58, roots[1], "engine_gameplay") ||
@@ -150,85 +166,143 @@ inline Result probe(std::uint64_t module_base, std::uint64_t mapped_size,
     }
     result.viewport_width = viewport[0]; result.viewport_height = viewport[1];
     result.camera_geometry_read = true;
-    if (!read_pointer(roots[3], 0x98, roots[4], "camera_world") ||
-        !exact_vtable(roots[4], world_vtable_rva, "world_vtable") ||
-        !read_pointer(roots[4], 0x148, roots[5], "world_default_level")) return result;
-    std::uint64_t level_vtable = 0;
-    if (!read_pointer(roots[5], 0, level_vtable, "level_vtable")) return result;
-    if (std::none_of(level_vtables.begin(), level_vtables.end(),
-                     [&](std::uint64_t rva) { return level_vtable == module_base + rva; })) {
-        result.status = Status::vtable_mismatch; return result;
-    }
-    if (!read_pointer(roots[5], 0xf0, roots[6], "level_root_area") ||
-        !exact_vtable(roots[6], area_vtable_rva, "area_vtable") ||
-        !read_pointer(roots[6], 0xb8, roots[7], "area_entity_sentinel")) return result;
+    if (!read_pointer(roots[1], 0x60, roots[4], "gameplay_scenario") ||
+        !exact_vtable(roots[4], scenario_vtable_rva, "scenario_vtable") ||
+        !read_pointer(roots[4], 0xd60, roots[5], "scenario_active_world") ||
+        !exact_vtable(roots[5], world_vtable_rva, "world_vtable")) return result;
     result.scene_guards_matched = true;
-    std::array<std::uint64_t, 2> sentinel_links{};
-    if (!read_at(roots[7], 0, sentinel_links.data(), sizeof(sentinel_links), "sentinel_links", true)) return result;
+
+    struct Anchor { std::uint64_t owner, offset, value; };
+    std::vector<Anchor> anchors;
+    const auto anchor_pointer = [&](std::uint64_t owner, std::uint64_t offset,
+                                    std::uint64_t& value, const char* stage) {
+        if (!read_pointer(owner, offset, value, stage)) return false;
+        anchors.push_back({owner, offset, value});
+        return true;
+    };
+    const auto accept_collection = [&](const sc::Collection& collection, const char* stage,
+                                       bool allow_limit = false) {
+        if (collection.status == sc::Status::candidate_collection && collection.complete) return true;
+        if (allow_limit && collection.status == sc::Status::limit_reached) return true;
+        result.stage = stage;
+        result.detail_stage = collection.stage;
+        if (result.status == Status::read_budget_exceeded) return false;
+        switch (collection.status) {
+        case sc::Status::invalid_reader: result.status = Status::invalid_reader; break;
+        case sc::Status::null_pointer: result.status = Status::null_pointer; break;
+        case sc::Status::invalid_collection:
+        case sc::Status::invalid_address: result.status = Status::invalid_address; break;
+        case sc::Status::list_cycle: result.status = Status::list_cycle; break;
+        case sc::Status::list_links_inconsistent: result.status = Status::list_links_inconsistent; break;
+        case sc::Status::limit_reached: result.status = Status::node_limit_reached; break;
+        case sc::Status::snapshot_changed: result.status = Status::snapshot_changed; break;
+        default: result.status = Status::read_failed; break;
+        }
+        return false;
+    };
+    std::vector<sc::Collection> collections;
+    std::vector<std::uint64_t> levels, areas, observed_entities;
+    const auto add_unique = [&](std::vector<std::uint64_t>& values, std::uint64_t value,
+                                std::size_t limit, const char* stage) {
+        if (!value || std::find(values.begin(), values.end(), value) != values.end()) return true;
+        if (values.size() >= limit) {
+            result.status = Status::node_limit_reached; result.stage = stage; return false;
+        }
+        values.push_back(value);
+        return true;
+    };
+    std::uint64_t default_level = 0;
+    if (!anchor_pointer(roots[5], 0x148, default_level, "world_default_level") ||
+        !add_unique(levels, default_level, max_levels, "level_limit")) return result;
+    auto active = sc::active_levels(roots[5], bounded_reader, max_levels);
+    if (!accept_collection(active, "active_levels")) return result;
+    for (auto level : active.values)
+        if (!add_unique(levels, level, max_levels, "level_limit")) return result;
+    collections.push_back(std::move(active));
+    for (auto level : levels) {
+        std::uint64_t vtable = 0, root_area = 0;
+        if (!read_pointer(level, 0, vtable, "level_vtable")) return result;
+        if (std::none_of(level_vtables.begin(), level_vtables.end(),
+                         [&](std::uint64_t rva) { return vtable == module_base + rva; })) {
+            result.status = Status::vtable_mismatch; return result;
+        }
+        ++result.levels_observed;
+        if (!anchor_pointer(level, 0xf0, root_area, "level_root_area") ||
+            !add_unique(areas, root_area, max_areas, "area_limit")) return result;
+        auto subareas = sc::sub_areas(level, bounded_reader, max_areas);
+        if (!accept_collection(subareas, "level_sub_areas")) return result;
+        for (auto area : subareas.values)
+            if (!add_unique(areas, area, max_areas, "area_limit")) return result;
+        collections.push_back(std::move(subareas));
+    }
     const auto limit = std::min(node_limit, max_nodes);
-    std::array<std::uint64_t, max_nodes> visited{};
-    std::uint64_t node = sentinel_links[0], previous = roots[7];
-    while (node != roots[7]) {
-        if (std::find(visited.begin(), visited.begin() + result.entities.size(), node) !=
-            visited.begin() + result.entities.size()) {
-            result.status = Status::list_cycle; result.stage = "list_next"; return result;
-        }
-        if (result.entities.size() >= limit) {
-            result.status = Status::node_limit_reached; result.stage = "list_limit"; return result;
-        }
-        std::array<std::uint64_t, 3> record{};
-        if (!read_at(node, 0, record.data(), sizeof(record), "entity_node", true)) return result;
-        if (record[1] != previous) {
-            result.status = Status::list_links_inconsistent; result.stage = "entity_node_previous"; return result;
-        }
-        std::uint64_t entity_vtable = 0;
-        if (!read_pointer(record[2], 0, entity_vtable, "entity_vtable")) return result;
-        if ((entity_vtable & 7) || entity_vtable < module_base + cp::rdata_begin_rva ||
-            entity_vtable >= module_base + cp::rdata_end_rva) {
-            result.status = Status::entity_vtable_outside_rdata; return result;
-        }
-        EntitySummary entity;
-        entity.vtable_rva = entity_vtable - module_base;
-        entity.native_entity_type_known = std::find(entity_vtables.begin(), entity_vtables.end(),
-                                                   entity.vtable_rva) != entity_vtables.end();
-        if (entity.native_entity_type_known) {
-            // IEntity.Skeleton getter 0x95be70: tagged component index, not a raw pointer.
-            std::uint8_t tag = 0;
-            if (!read_at(record[2], 0xa1, &tag, sizeof(tag), "entity_skeleton_tag")) return result;
-            if (tag & 0x80) {
-                std::uint64_t components = 0, skeleton = 0;
-                if (!read_pointer(record[2], 0x40, components, "entity_components") ||
-                    !read_pointer(components, (tag & 0x7f) * sizeof(std::uint64_t), skeleton,
-                                  "entity_skeleton_component")) return result;
-                entity.skeleton_present = skeleton != 0;
+    for (auto area : areas) {
+        if (!exact_vtable(area, area_vtable_rva, "area_vtable")) return result;
+        ++result.areas_observed;
+        auto objects = sc::entities(area, bounded_reader, limit - result.entity_nodes_observed);
+        result.entity_nodes_observed += objects.values.size();
+        if (!accept_collection(objects, "area_entities", true)) return result;
+        for (auto object : objects.values) {
+            if (std::find(observed_entities.begin(), observed_entities.end(), object) !=
+                observed_entities.end()) continue;
+            if (result.entities.size() >= limit) {
+                result.status = Status::node_limit_reached; result.stage = "entity_limit"; return result;
             }
-            entity.skeleton_checked = true;
+            std::uint64_t entity_vtable = 0;
+            if (!read_pointer(object, 0, entity_vtable, "entity_vtable")) return result;
+            if ((entity_vtable & 7) || entity_vtable < module_base + cp::rdata_begin_rva ||
+                entity_vtable >= module_base + cp::rdata_end_rva) {
+                result.status = Status::entity_vtable_outside_rdata; return result;
+            }
+            EntitySummary entity;
+            entity.vtable_rva = entity_vtable - module_base;
+            entity.native_entity_type_known = std::find(entity_vtables.begin(), entity_vtables.end(),
+                                                       entity.vtable_rva) != entity_vtables.end();
+            if (entity.native_entity_type_known) {
+                std::uint8_t tag = 0;
+                if (!read_at(object, 0xa1, &tag, sizeof(tag), "entity_skeleton_tag")) return result;
+                if (tag & 0x80) {
+                    std::uint64_t components = 0, skeleton = 0;
+                    if (!read_pointer(object, 0x40, components, "entity_components") ||
+                        !read_pointer(components, (tag & 0x7f) * sizeof(std::uint64_t), skeleton,
+                                      "entity_skeleton_component")) return result;
+                    entity.skeleton_present = skeleton != 0;
+                }
+                entity.skeleton_checked = true;
+                const auto position = ep::read(object, bounded_reader);
+                if (position.status != ep::Status::candidate_position) {
+                    result.stage = position.stage;
+                    if (result.status != Status::read_budget_exceeded)
+                        result.status = position.status == ep::Status::read_failed ?
+                            Status::read_failed : Status::invalid_entity_position;
+                    return result;
+                }
+                entity.position = position.position;
+                entity.position_checked = true;
+            }
+            observed_entities.push_back(object);
+            result.entities.push_back(entity);
         }
-        std::array<std::uint64_t, 3> rechecked{};
-        if (!read_at(node, 0, rechecked.data(), sizeof(rechecked), "entity_node_recheck", true)) return result;
-        if (record != rechecked) { result.status = Status::snapshot_changed; return result; }
-        visited[result.entities.size()] = node;
-        result.entities.push_back(entity);
-        previous = node; node = record[0];
+        if (!accept_collection(objects, "area_entities")) return result;
+        collections.push_back(std::move(objects));
     }
-    if (sentinel_links[1] != previous) {
-        result.status = Status::list_links_inconsistent; result.stage = "sentinel_previous"; return result;
-    }
-    const std::array<std::uint64_t, 8> owners{{module_base, roots[0], roots[1], roots[2],
-                                              roots[3], roots[4], roots[5], roots[6]}};
-    constexpr std::array<std::uint64_t, 8> offsets{{cp::engine_global_rva, 0x58, 0x58, 0xd88,
-                                                  0x98, 0x148, 0xf0, 0xb8}};
-    for (std::size_t n = 0; n < roots.size(); ++n) {
+    const std::array<std::uint64_t, 6> owners{{module_base, roots[0], roots[1], roots[2], roots[1], roots[4]}};
+    constexpr std::array<std::uint64_t, 6> offsets{{cp::engine_global_rva, 0x58, 0x58, 0xd88, 0x60, 0xd60}};
+    for (std::size_t n = 0; n < roots.size(); ++n) anchors.push_back({owners[n], offsets[n], roots[n]});
+    for (const auto& anchor : anchors) {
         std::uint64_t actual = 0;
-        if (!read_pointer(owners[n], offsets[n], actual, "root_recheck")) return result;
-        if (actual != roots[n]) { result.status = Status::snapshot_changed; return result; }
+        if (!read_pointer(anchor.owner, anchor.offset, actual, "root_recheck")) return result;
+        if (actual != anchor.value) { result.status = Status::snapshot_changed; return result; }
     }
-    std::array<std::uint64_t, 2> final_links{};
-    if (!read_at(roots[7], 0, final_links.data(), sizeof(final_links), "sentinel_recheck", true)) return result;
-    if (final_links != sentinel_links) { result.status = Status::snapshot_changed; return result; }
+    for (auto& collection : collections) {
+        if (!sc::stable(collection, bounded_reader)) {
+            accept_collection(collection, "collection_final_recheck"); return result;
+        }
+    }
+
     result.consistency_recheck_passed = true;
     result.collection_complete = true;
-    result.stage = "candidate_root_area_collection";
+    result.stage = "candidate_scene_collection";
     result.status = Status::candidate_collection;
     return result;
 }
