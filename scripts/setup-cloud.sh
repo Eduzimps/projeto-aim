@@ -42,4 +42,5 @@ EOF
 fi
 bash "$project_dir/scripts/test.sh"
 bash "$project_dir/scripts/build-windows.sh"
+bash "$project_dir/scripts/build-camera-probe.sh"
 touch "$toolchain_root/.complete"

@@ -10,6 +10,8 @@ No GitHub, clique em **Code → Download ZIP**, extraia o arquivo baixado e entr
 
 No Windows x64, abra `dist/zyon-preview.exe`. O executável é independente de runtimes C++ adicionais.
 
+O diagnóstico separado `dist/zyon-camera-probe.exe` verifica a cadeia candidata de câmera para a build analisada. Com o jogo aberto, ele produz `BloodStrike-camera-*.json` na Área de Trabalho. A análise estática e suas limitações estão em [docs/client-analysis.md](docs/client-analysis.md). O diagnóstico ainda não fornece ESP ou aimbot.
+
 - **Mira / Visual:** alterna entre as opções.
 - **FOV:** raio de 60 a 280 unidades visuais, escaladas com o DPI do Windows; não são graus de câmera.
 - **Força:** 1–100%; menor significa convergência mais lenta.
@@ -34,9 +36,10 @@ Após a preparação:
 ```bash
 bash scripts/test.sh
 bash scripts/build-windows.sh
+bash scripts/build-camera-probe.sh
 ```
 
-O primeiro comando compila/executa testes da matemática em Linux. O segundo gera `dist/zyon-preview.exe` com MinGW x64 e avisos tratados como erros. `build/` e os arquivos temporários de `dist/` são ignorados pelo Git; o executável, a imagem da interface e o ZIP de distribuição são incluídos para download. `ZYON_MINGW_ROOT` permite escolher outro diretório do compilador e `CXX_WINDOWS` permite indicar um compilador MinGW já instalado.
+Os comandos executam os testes portáteis e geram `dist/zyon-preview.exe` e `dist/zyon-camera-probe.exe` com MinGW x64 e avisos tratados como erros. `build/` e os arquivos temporários de `dist/` são ignorados pelo Git; os executáveis, a imagem da interface e o ZIP de distribuição são incluídos para download. `ZYON_MINGW_ROOT` permite escolher outro diretório do compilador e `CXX_WINDOWS` permite indicar um compilador MinGW já instalado.
 
 Para abrir a prévia internamente na nuvem ou testar a interface com Wine/Xvfb:
 
@@ -62,9 +65,11 @@ Validação desta entrega: compilação x64 concluída, suíte matemática aprov
 
 Os anexos `bloodstrike-dump.md` e `bloodstrike-offsets.json` contêm a mesma lista de offsets sem versão, módulo ou validação. Nomes como `BaseNetworkable`, `BasePlayer`, `PlayerEyes` e `TOD_Sky` lembram estruturas de Rust/Unity; não estabelecem compatibilidade com Blood Strike.
 
+O executável recebido depois foi reconstruído com SHA256 verificado e contém interfaces Messiah/Python. Foi derivada uma cadeia candidata de câmera específica desse arquivo. Sua leitura em execução ainda precisa ser validada; os offsets antigos não foram reutilizados. Veja o relatório de análise acima.
+
 Para implementar e verificar uma conexão real, ainda faltam a versão/build correta do jogo e dados correspondentes: módulo e layout da lista de entidades, identificação do jogador local/equipes, posições globais dos jogadores/ossos, tipos e origem dos valores de vida e matriz de câmera com suas convenções. Os endereços enviados não foram usados nem substituídos por palpites.
 
-Este projeto não se conecta ao processo do jogo. A compilação e os testes matemáticos não validam ESP ou aimbot dentro de Blood Strike.
+A prévia visual não se conecta ao processo do jogo. O diagnóstico separado faz leituras limitadas da câmera candidata. A compilação e os testes matemáticos não validam ESP ou aimbot dentro de Blood Strike.
 
 ### Coletar o cliente instalado para análise estática
 
