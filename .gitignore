@@ -1,0 +1,9 @@
+/build/
+/dist/*
+*.exe
+*.o
+*.obj
+*.pdb
+!/dist/zyon-preview.exe
+!/dist/zyon-preview.png
+!/dist/zyon-windows-preview.zip
